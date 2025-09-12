@@ -1,10 +1,10 @@
 import logging
 import random
+import asyncio
 from datetime import datetime, time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackContext
 import io
-import math
 
 # Настройка логирования
 logging.basicConfig(
@@ -16,23 +16,18 @@ logger = logging.getLogger(__name__)
 # Ваш токен бота
 BOT_TOKEN = "6387413984:AAGUMwJlOidPoKZ3_m1PgFYq1fB0j5yoxDM"
 # ID вашей группы (ЗАМЕНИТЕ НА РЕАЛЬНЫЙ!)
-GROUP_CHAT_ID = "-1002592721236"
+GROUP_CHAT_ID = "-1001234567890"  # ЗАМЕНИТЕ ЭТОТ ID!
 
-# Списки промптов для котиков
-CAT_PROMPTS = [
-    "Милый пушистый котенок играет с клубком",
-    "Величественный кот на троне в королевском стиле",
-    "Спящий кот в уютной корзине",
-    "Кот с красивыми зелеными глазами",
-    "Игривый котенок гоняется за бабочкой в саду",
-    "Кот в крошечной короне в фэнтези стиле",
-    "Группа котят прижимается друг к другу",
-    "Кот исследует магический лес",
-    "Кот с крыльями в ангельском стиле",
-    "Кот в скафандре в научно-фантастической тематике"
+# Списки промптов
+PROMPTS = [
+    "Красивый пейзаж с горами и озером",
+    "Футуристический город с неоновыми огнями",
+    "Милые животные в природной среде",
+    "Космическое пространство с планетами",
+    "Абстрактное искусство с яркими цветами"
 ]
 
-class BeautifulCatGenerator:
+class SimpleImageGenerator:
     def __init__(self):
         self.has_pillow = self._check_pillow()
         
@@ -42,325 +37,315 @@ class BeautifulCatGenerator:
             from PIL import Image, ImageDraw
             return True
         except ImportError:
-            logger.warning("Pillow не установлен. Установите: pip install pillow")
+            logger.warning("Pillow не установлен. Используем простую генерацию.")
             return False
     
-    async def generate_cat_image(self, prompt: str) -> bytes:
-        """Генерирует красивого котика"""
+    async def generate_image(self, prompt: str) -> bytes:
+        """Генерирует простое изображение"""
         try:
             if self.has_pillow:
-                return await self._create_beautiful_cat(prompt)
+                return await self._create_image_with_pillow(prompt)
             else:
-                return await self._create_simple_cat()
-                
+                return await self._create_simple_image(prompt)
         except Exception as e:
-            logger.error(f"Ошибка генерации котика: {e}")
-            return await self._create_simple_cat()
+            logger.error(f"Ошибка генерации: {e}")
+            return await self._create_simple_image(prompt)
     
-    async def _create_beautiful_cat(self, prompt: str) -> bytes:
-        """Создает красивого котика с помощью Pillow"""
-        from PIL import Image, ImageDraw
+    async def _create_image_with_pillow(self, prompt: str) -> bytes:
+        """Создает изображение с помощью Pillow"""
+        from PIL import Image, ImageDraw, ImageFont
         
-        # Создаем изображение с милым фоном
-        width, height = 600, 600
+        # Создаем изображение
+        img = Image.new('RGB', (512, 512), color=(
+            random.randint(50, 200),
+            random.randint(50, 200), 
+            random.randint(50, 200)
+        ))
         
-        # Милые пастельные цвета для фона
-        bg_colors = [
-            (255, 228, 225),  # лавандовый
-            (255, 250, 205),  # лимонный
-            (230, 255, 253),  # голубой
-            (255, 235, 205),  # персиковый
-            (230, 255, 230),  # мятный
-        ]
-        
-        img = Image.new('RGB', (width, height), color=random.choice(bg_colors))
         draw = ImageDraw.Draw(img)
         
-        # Рисуем милого котика
-        self._draw_cute_cat(draw, width, height)
+        # Добавляем градиент
+        for i in range(512):
+            r = int(i / 512 * random.randint(0, 255))
+            g = int(i / 512 * random.randint(0, 255))
+            b = int(i / 512 * random.randint(0, 255))
+            draw.line([(0, i), (512, i)], fill=(r, g, b), width=1)
         
-        # Добавляем декоративные элементы
-        self._add_decorations(draw, width, height)
+        # Добавляем текст
+        try:
+            font = ImageFont.load_default()
+            draw.text((50, 250), f"🎨 {prompt}", fill=(255, 255, 255), font=font)
+            draw.text((150, 300), "Ежедневное искусство", fill=(255, 255, 255), font=font)
+        except:
+            pass
         
         img_byte_arr = io.BytesIO()
-        img.save(img_byte_arr, format='PNG', quality=95)
+        img.save(img_byte_arr, format='PNG')
         return img_byte_arr.getvalue()
     
-    def _draw_cute_cat(self, draw: ImageDraw.Draw, width: int, height: int):
-        """Рисует милого котика"""
-        center_x, center_y = width // 2, height // 2
-        
-        # Тело котика (пушистое и круглое)
-        body_color = self._get_cat_color()
-        draw.ellipse([center_x - 100, center_y - 50, center_x + 100, center_y + 150], 
-                    fill=body_color, outline=(100, 100, 100), width=2)
-        
-        # Голова
-        head_color = body_color
-        draw.ellipse([center_x - 80, center_y - 120, center_x + 80, center_y + 30], 
-                    fill=head_color, outline=(100, 100, 100), width=2)
-        
-        # Уши
-        ear_color = body_color
-        # Левое ухо
-        draw.polygon([
-            (center_x - 70, center_y - 110),
-            (center_x - 120, center_y - 160),
-            (center_x - 50, center_y - 90)
-        ], fill=ear_color, outline=(100, 100, 100), width=2)
-        
-        # Правое ухо
-        draw.polygon([
-            (center_x + 70, center_y - 110),
-            (center_x + 120, center_y - 160),
-            (center_x + 50, center_y - 90)
-        ], fill=ear_color, outline=(100, 100, 100), width=2)
-        
-        # Внутренняя часть ушей
-        draw.polygon([
-            (center_x - 75, center_y - 105),
-            (center_x - 100, center_y - 140),
-            (center_x - 55, center_y - 95)
-        ], fill=(255, 200, 200))
-        
-        draw.polygon([
-            (center_x + 75, center_y - 105),
-            (center_x + 100, center_y - 140),
-            (center_x + 55, center_y - 95)
-        ], fill=(255, 200, 200))
-        
-        # Глаза (большие и выразительные)
-        eye_color = random.choice([(0, 191, 255), (50, 205, 50), (255, 165, 0)])  # голубые, зеленые, оранжевые
-        draw.ellipse([center_x - 50, center_y - 50, center_x - 20, center_y - 20], 
-                    fill=(255, 255, 255))  # белок
-        draw.ellipse([center_x + 20, center_y - 50, center_x + 50, center_y - 20], 
-                    fill=(255, 255, 255))  # белок
-        
-        draw.ellipse([center_x - 40, center_y - 40, center_x - 30, center_y - 30], 
-                    fill=eye_color)  # радужка
-        draw.ellipse([center_x + 30, center_y - 40, center_x + 40, center_y - 30], 
-                    fill=eye_color)  # радужка
-        
-        draw.ellipse([center_x - 35, center_y - 35, center_x - 33, center_y - 33], 
-                    fill=(0, 0, 0))  # зрачок
-        draw.ellipse([center_x + 33, center_y - 35, center_x + 35, center_y - 33], 
-                    fill=(0, 0, 0))  # зрачок
-        
-        # Носик (маленький розовый треугольник)
-        draw.polygon([
-            (center_x - 10, center_y - 5),
-            (center_x + 10, center_y - 5),
-            (center_x, center_y + 5)
-        ], fill=(255, 150, 150))
-        
-        # Ротик (улыбка)
-        draw.arc([center_x - 15, center_y + 5, center_x + 15, center_y + 15], 
-                180, 0, fill=(0, 0, 0), width=2)
-        
-        # Усы
-        for i in range(3):
-            # Левые усы
-            draw.line([(center_x - 20, center_y), (center_x - 60, center_y - 20 + i*10)], 
-                     fill=(100, 100, 100), width=1)
-            draw.line([(center_x - 20, center_y + 5), (center_x - 60, center_y + i*10)], 
-                     fill=(100, 100, 100), width=1)
-            # Правые усы
-            draw.line([(center_x + 20, center_y), (center_x + 60, center_y - 20 + i*10)], 
-                     fill=(100, 100, 100), width=1)
-            draw.line([(center_x + 20, center_y + 5), (center_x + 60, center_y + i*10)], 
-                     fill=(100, 100, 100), width=1)
-        
-        # Лапки
-        paw_color = body_color
-        draw.ellipse([center_x - 70, center_y + 120, center_x - 40, center_y + 140], 
-                    fill=paw_color, outline=(100, 100, 100), width=2)
-        draw.ellipse([center_x + 40, center_y + 120, center_x + 70, center_y + 140], 
-                    fill=paw_color, outline=(100, 100, 100), width=2)
-    
-    def _get_cat_color(self):
-        """Возвращает милый цвет для котика"""
-        colors = [
-            (200, 170, 150),  # бежевый
-            (180, 160, 140),  # серо-бежевый
-            (220, 180, 160),  # персиковый
-            (170, 150, 130),  # коричневатый
-            (190, 170, 150),  # кремовый
-        ]
-        return random.choice(colors)
-    
-    def _add_decorations(self, draw: ImageDraw.Draw, width: int, height: int):
-        """Добавляет декоративные элементы"""
-        # Сердечки вокруг котика
-        for _ in range(8):
-            x = random.randint(50, width - 50)
-            y = random.randint(50, height - 50)
-            size = random.randint(10, 20)
-            self._draw_heart(draw, x, y, size, (255, 150, 150))
-        
-        # Звездочки
-        for _ in range(5):
-            x = random.randint(30, width - 30)
-            y = random.randint(30, height - 30)
-            self._draw_star(draw, x, y, 8, (255, 255, 100))
-    
-    def _draw_heart(self, draw: ImageDraw.Draw, x: int, y: int, size: int, color: tuple):
-        """Рисует сердечко"""
-        # Левая половина сердца
-        draw.ellipse([x, y, x + size, y + size], fill=color)
-        # Правая половина сердца
-        draw.ellipse([x + size, y, x + 2*size, y + size], fill=color)
-        # Нижняя часть сердца
-        draw.polygon([
-            (x, y + size//2),
-            (x + size, y + 2*size),
-            (x + 2*size, y + size//2)
-        ], fill=color)
-    
-    def _draw_star(self, draw: ImageDraw.Draw, x: int, y: int, size: int, color: tuple):
-        """Рисует звездочку"""
-        points = []
-        for i in range(5):
-            # Внешние точки
-            angle = math.pi/2 + i * 2*math.pi/5
-            points.append((x + size * math.cos(angle), y + size * math.sin(angle)))
-            # Внутренние точки
-            angle += math.pi/5
-            points.append((x + size/2 * math.cos(angle), y + size/2 * math.sin(angle)))
-        
-        draw.polygon(points, fill=color)
-    
-    async def _create_simple_cat(self) -> bytes:
-        """Простая заглушка если Pillow не установлен"""
-        # Можно вернуть пустое изображение или сообщение об ошибке
+    async def _create_simple_image(self, prompt: str) -> bytes:
+        """Создает самое простое изображение"""
+        # Для демонстрации возвращаем пустой bytes
         return b''
 
 # Инициализация генератора
-cat_generator = BeautifulCatGenerator()
+image_generator = SimpleImageGenerator()
 
-# ========== КОМАНДЫ БОТА ==========
+# Переменная для отслеживания отправок
+last_sent_time = None
+sent_count = 0
+
+async def send_daily_image(context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет ежедневное изображение в группу"""
+    global last_sent_time, sent_count
+    
+    try:
+        # Проверяем, установлен ли ID группы
+        if GROUP_CHAT_ID == "-1001234567890":
+            logger.error("❌ ID группы не настроен! Используйте /chat_id в группе")
+            return
+        
+        logger.info(f"🕒 Попытка отправки в группу {GROUP_CHAT_ID}")
+        
+        # Выбираем случайный промпт
+        prompt = random.choice(PROMPTS)
+        
+        # Генерируем изображение
+        image_data = await image_generator.generate_image(prompt)
+        
+        if image_data:
+            # Отправляем в группу
+            await context.bot.send_photo(
+                chat_id=GROUP_CHAT_ID,
+                photo=image_data,
+                caption=f"🎨 Ежедневное искусство!\n"
+                       f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
+                       f"📝 {prompt}\n\n"
+                       f"#искусство #нейросеть #ежедневно"
+            )
+            
+            # Обновляем статистику
+            last_sent_time = datetime.now()
+            sent_count += 1
+            
+            logger.info(f"✅ Изображение отправлено в группу {GROUP_CHAT_ID}")
+            logger.info(f"📊 Всего отправлено: {sent_count}")
+        else:
+            logger.error("❌ Не удалось сгенерировать изображение")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка при отправке в группу: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главная команда"""
-    welcome_text = """
-🐱 *Добро пожаловать в Бот Красивых Котиков!*
+    welcome_text = f"""
+🎨 *Добро пожаловать в Арт-Бот!*
 
-Я создаю милых и красивых котиков!
+Я отправляю изображения в группу каждый день в 9:00.
 
-✨ *Команды:*
-/cat - Сгенерировать котика
-/cute - Милый котик
-/fluffy - Пушистый котик
-/sleepy - Сонный котик
-/playful - Игривый котик
+*📊 Статистика:*
+• Всего отправок: {sent_count}
+• Последняя отправка: {last_sent_time.strftime('%d.%m.%Y %H:%M') if last_sent_time else 'Никогда'}
 
-🎨 *Дополнительно:*
+*📋 Команды:*
+/test - Тестовое изображение
 /status - Статус бота
-/help - Помощь по командам
+/chat_id - Получить ID чата
+/set_group - Установить ID группы
+/daily - Принудительная отправка
 
-Просто напишите /cat чтобы получить котика!
+*⚠️ Важно:*
+Убедитесь что ID группы настроен!
     """
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
-async def generate_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Генерация котика"""
-    await update.message.reply_text("🐱 Генерирую красивого котика...")
+async def test_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Тестовая генерация"""
+    await update.message.reply_text("🎨 Генерирую тестовое изображение...")
     
-    prompt = random.choice(CAT_PROMPTS)
-    image_data = await cat_generator.generate_cat_image(prompt)
+    prompt = random.choice(PROMPTS)
+    image_data = await image_generator.generate_image(prompt)
     
     if image_data:
         await context.bot.send_photo(
             chat_id=update.message.chat_id,
             photo=image_data,
-            caption=f"✨ {prompt}\n\n#кот #котик #милота 🐾"
+            caption=f"🖼 Тестовое изображение\n📝 {prompt}"
         )
     else:
-        await update.message.reply_text(
-            "❌ Не удалось сгенерировать котика.\n"
-            "📦 Установите Pillow: pip install pillow"
-        )
+        await update.message.reply_text("❌ Ошибка генерации изображения")
 
-async def generate_cute_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Милый котик"""
-    await update.message.reply_text("💖 Генерирую особенно милого котика...")
-    await generate_cat(update, context)
+async def force_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Принудительная отправка в группу"""
+    try:
+        if GROUP_CHAT_ID == "-1001234567890":
+            await update.message.reply_text("❌ ID группы не настроен! Используйте /chat_id в группе")
+            return
+        
+        await update.message.reply_text("🔄 Принудительная отправка в группу...")
+        await send_daily_image(context)
+        await update.message.reply_text("✅ Сообщение отправлено в группу!")
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
 
-async def generate_fluffy_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Пушистый котик"""
-    await update.message.reply_text("🦁 Генерирую пушистого котика...")
-    await generate_cat(update, context)
+async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получить ID чата"""
+    chat_info = f"""
+*📋 Информация о чате:*
 
-async def generate_sleepy_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сонный котик"""
-    await update.message.reply_text("😴 Генерирую сонного котика...")
-    await generate_cat(update, context)
+• ID: `{update.message.chat_id}`
+• Тип: `{update.message.chat.type}`
+• Название: `{update.message.chat.title or 'Личный чат'}`
 
-async def generate_playful_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Игривый котик"""
-    await update.message.reply_text("🎾 Генерирую игривого котика...")
-    await generate_cat(update, context)
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Помощь по командам"""
-    help_text = """
-🐾 *Помощь по командам котиков:*
-
-/cat - Случайный котик
-/cute - Особенно милый котик
-/fluffy - Пушистый котик
-/sleepy - Сонный котик
-/playful - Игривый котик
-
-📊 *Информация:*
-/status - Статус бота
-/start - Главное меню
-
-💡 *Для лучшего качества:*
-Установите Pillow: pip install pillow
+*💡 Для установки группы:*
+1. Добавьте бота в группу
+2. Напишите `/chat_id` в группе
+3. Скопируйте ID группы
+4. Используйте `/set_group <ID_группы>`
     """
-    await update.message.reply_text(help_text, parse_mode='Markdown')
+    await update.message.reply_text(chat_info, parse_mode='Markdown')
+
+async def set_group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Установить ID группы"""
+    if not context.args:
+        await update.message.reply_text("❌ Укажите ID группы: /set_group <group_id>")
+        return
+    
+    global GROUP_CHAT_ID
+    GROUP_CHAT_ID = context.args[0]
+    await update.message.reply_text(f"✅ ID группы установлен: `{GROUP_CHAT_ID}`", parse_mode='Markdown')
 
 async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Статус бота"""
     status_text = f"""
-📊 *Статус Бота Котиков:*
+*📊 Статус бота:*
 
 • 🟢 Онлайн и работает
-• 🐱 Сгенерировано котиков: 0
-• 🎨 Pillow: {'✅ Установлен' if cat_generator.has_pillow else '❌ Не установлен'}
-• 💫 Режим: Красивые котики
+• ⏰ Следующая отправка: 09:00
+• 📝 Промптов: {len(PROMPTS)}
+• 👥 Группа: {'✅ Настроена' if GROUP_CHAT_ID != '-1001234567890' else '❌ Не настроена'}
+• 🖼 Всего отправок: {sent_count}
+• 🕒 Последняя отправка: {last_sent_time.strftime('%d.%m.%Y %H:%M') if last_sent_time else 'Никогда'}
 
-✨ *Особенности:*
-- Большие выразительные глаза
-- Пушистая шерстка
-- Милые позы
-- Декоративные элементы
-- Пастельные цвета
-
-Версия: 2.0 🐾
+*🔧 Техническая информация:*
+• Pillow: {'✅ Установлен' if image_generator.has_pillow else '❌ Не установлен'}
+• ID группы: `{GROUP_CHAT_ID}`
     """
     await update.message.reply_text(status_text, parse_mode='Markdown')
 
-# ========== ЗАПУСК БОТА ==========
+async def simulate_daily_job(context: ContextTypes.DEFAULT_TYPE):
+    """Симуляция ежедневной job для тестирования"""
+    logger.info("🔧 Симуляция ежедневной отправки...")
+    await send_daily_image(context)
+
+async def post_init(application: Application):
+    """Инициализация после запуска бота"""
+    try:
+        # Проверяем доступность JobQueue
+        if hasattr(application, 'job_queue') and application.job_queue:
+            job_queue = application.job_queue
+            
+            # Добавляем ежедневную задачу в 9:00
+            job_queue.run_daily(
+                send_daily_image,
+                time=time(hour=9, minute=0, second=0),
+                days=tuple(range(7)),
+                name="daily_art_job"
+            )
+            
+            # Добавляем тестовую задачу каждые 5 минут для отладки
+            job_queue.run_repeating(
+                simulate_daily_job,
+                interval=300,  # 5 минут
+                first=10,      # начать через 10 секунд
+                name="test_job"
+            )
+            
+            logger.info("✅ JobQueue настроена")
+            logger.info("✅ Ежедневная задача на 9:00")
+            logger.info("✅ Тестовая задача каждые 5 минут")
+        else:
+            logger.warning("⚠️ JobQueue недоступна")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка настройки JobQueue: {e}")
 
 def main():
     """Запуск бота"""
     try:
+        print("🎨 Запуск Арт-Бота...")
+        print("⚠️  Убедитесь что установлен python-telegram-bot с JobQueue:")
+        print("    pip install \"python-telegram-bot[job-queue]\"")
+        
         # Создаем приложение
         application = Application.builder().token(BOT_TOKEN).build()
         
         # Добавляем обработчики команд
         application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(CommandHandler("cat", generate_cat))
-        application.add_handler(CommandHandler("cute", generate_cute_cat))
-        application.add_handler(CommandHandler("fluffy", generate_fluffy_cat))
-        application.add_handler(CommandHandler("sleepy", generate_sleepy_cat))
-        application.add_handler(CommandHandler("playful", generate_playful_cat))
+        application.add_handler(CommandHandler("test", test_image))
+        application.add_handler(CommandHandler("daily", force_daily))
+        application.add_handler(CommandHandler("chat_id", get_chat_id))
+        application.add_handler(CommandHandler("set_group", set_group_id))
         application.add_handler(CommandHandler("status", bot_status))
         
+        # Настраиваем JobQueue
+        job_queue = application.job_queue
+        if job_queue:
+            print("✅ JobQueue доступна")
+            
+            # Основная задача в 9:00
+            job_queue.run_daily(
+                send_daily_image,
+                time=time(hour=9, minute=0, second=0),
+                days=tuple(range(7)),
+                name="daily_art_job"
+            )
+            
+            # Тестовая задача каждые 2 минуты для отладки
+            job_queue.run_repeating(
+                simulate_daily_job,
+                interval=120,  # 2 минуты
+                first=5,       # начать через 5 секунд
+                name="debug_job"
+            )
+            
+            print("✅ Задачи настроены:")
+            print("   - Ежедневно в 09:00")
+            print("   - Тест каждые 2 минуты")
+        else:
+            print("❌ JobQueue недоступна!")
+            print("📦 Установите: pip install \"python-telegram-bot[job-queue]\"")
+        
         # Запускаем бота
-        print("🐱 Бот Красивых Котиков запущен!")
-        print("✨ Команды:")
-        print("   /cat - Сгенерировать котика")
-        print("   /cute -
+        print("\n🤖 Бот запущен! Команды:")
+        print("   /start - Главное меню")
+        print("   /test - Тест изображения")
+        print("   /daily - Принудительная отправка")
+        print("   /chat_id - Получить ID группы")
+        print("   /set_group - Установить ID группы")
+        print("   /status - Статус бота")
+        print("\n⏰ Автоматическая отправка в 9:00 и каждые 2 мин для теста")
+        
+        application.run_polling()
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка запуска бота: {e}")
+        print(f"❌ Критическая ошибка: {e}")
+
+if __name__ == "__main__":
+    # Проверяем установку библиотек
+    try:
+        import telegram
+        print("✅ python-telegram-bot установлен")
+    except ImportError:
+        print("❌ python-telegram-bot не установлен!")
+        print("📦 Установите: pip install python-telegram-bot")
+    
+    try:
+        from PIL import Image
+        print("✅ Pillow установлен")
+    except ImportError:
+        print("⚠️  Pillow не установлен. Установите: pip install pillow")
+    
+    main()
