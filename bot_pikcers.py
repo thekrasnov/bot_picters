@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = "6387413984:AAGUMwJlOidPoKZ3_m1PgFYq1fB0j5yoxDM"
 
 # ID группы (замените на реальный!)
-GROUP_CHAT_ID = "-1002592721236"
+GROUP_CHAT_ID = "-1002689149167"
 
 # Время отправки по умолчанию
 POST_TIME = time(hour=9, minute=0)  # 09:00 по умолчанию
@@ -432,3 +432,4 @@ async def post_init(application: Application):
         if job_queue:
             # Создаем ежедневную задачу
             current_job
+
