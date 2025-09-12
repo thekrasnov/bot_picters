@@ -2,12 +2,13 @@ import logging
 import random
 import asyncio
 import aiohttp
-import json
+import re
 from datetime import datetime, time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackContext
 import io
-import base64
+from urllib.parse import quote
+import json
 
 # Настройка логирования
 logging.basicConfig(
@@ -18,8 +19,6 @@ logger = logging.getLogger(__name__)
 
 # Конфигурационные переменные
 BOT_TOKEN = "6387413984:AAGUMwJlOidPoKZ3_m1PgFYq1fB0j5yoxDM"
-NEUROIMG_API_KEY = "3747955d-f4e0-4dc4-b11a-941c6e08bb5d"
-NEUROIMG_API_URL = "https://api.neuroimg.art/v1/generate"
 
 # ID группы (замените на реальный!)
 GROUP_CHAT_ID = "-1002592721236"
@@ -27,134 +26,215 @@ GROUP_CHAT_ID = "-1002592721236"
 # Время отправки по умолчанию
 POST_TIME = time(hour=9, minute=0)  # 09:00 по умолчанию
 
-# Списки промптов
+# Списки промптов для поиска
 PROMPTS = [
-    "Beautiful landscape with mountains and lake, 4k, photorealistic",
-    "Futuristic city with neon lights, cyberpunk style, detailed",
-    "Cute animals in natural environment, high quality, vibrant colors",
-    "Cosmic space with planets and stars, nebula, vibrant colors",
-    "Abstract art with bright colors and shapes, digital painting",
-    "Ancient castle in fog, mystical atmosphere, fantasy art",
-    "Underwater world with corals and tropical fish, clear water",
-    "Autumn forest with golden leaves, cozy atmosphere, sunlight",
-    "Magical forest with glowing plants, fantasy style, enchanting",
-    "Mountain waterfall in sunny day, nature, peaceful"
+    "красивый пейзаж с горами",
+    "футуристический город ночью",
+    "милые животные в природе", 
+    "космос планеты звезды",
+    "абстрактное искусство",
+    "старинный замок",
+    "подводный мир кораллы",
+    "осенний лес золотые листья",
+    "магический лес",
+    "горный водопад"
 ]
 
 CAT_PROMPTS = [
-    "Cute fluffy kitten playing with yarn, photorealistic, detailed fur",
-    "Majestic cat sitting on a throne, royal style, beautiful eyes",
-    "Sleeping cat in a cozy basket, warm lighting, peaceful",
-    "Cat with beautiful green eyes, detailed fur, high quality",
-    "Playful kitten chasing a butterfly in garden, happy, vibrant colors"
+    "милый пушистый котенок",
+    "красивый кот глаза",
+    "кот спит корзине",
+    "игривый котенок играет",
+    "кот в короне",
+    "группа котят",
+    "кот в лесу",
+    "кот с крыльями",
+    "котик в космосе",
+    "смешной кот"
 ]
+
+# User-Agent для имитации браузера
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+}
+
+class YandexImageSearcher:
+    def __init__(self):
+        self.session = None
+        
+    async def init_session(self):
+        """Инициализация сессии"""
+        if not self.session:
+            self.session = aiohttp.ClientSession(headers=HEADERS)
+    
+    async def close_session(self):
+        """Закрытие сессии"""
+        if self.session:
+            await self.session.close()
+            self.session = None
+    
+    async def search_image(self, query: str) -> bytes:
+        """Ищет изображение через Яндекс Картинки"""
+        try:
+            await self.init_session()
+            
+            # Кодируем запрос для URL
+            encoded_query = quote(query)
+            
+            # URL для поиска в Яндекс Картинках
+            search_url = f"https://yandex.ru/images/search?text={encoded_query}&itype=jpg"
+            
+            logger.info(f"🔍 Поиск изображения: {query}")
+            
+            async with self.session.get(search_url, timeout=30) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    
+                    # Ищем URL изображений в HTML
+                    image_urls = self._extract_image_urls(html)
+                    
+                    if image_urls:
+                        # Выбираем случайное изображение
+                        image_url = random.choice(image_urls)
+                        logger.info(f"📷 Найдено изображение: {image_url}")
+                        
+                        # Скачиваем изображение
+                        return await self._download_image(image_url)
+                    else:
+                        logger.warning("❌ Изображения не найдены в HTML")
+                        return await self._get_fallback_image(query)
+                else:
+                    logger.error(f"❌ Ошибка HTTP: {response.status}")
+                    return await self._get_fallback_image(query)
+                    
+        except Exception as e:
+            logger.error(f"❌ Ошибка поиска: {e}")
+            return await self._get_fallback_image(query)
+    
+    def _extract_image_urls(self, html: str) -> list:
+        """Извлекает URL изображений из HTML"""
+        try:
+            # Паттерны для поиска URL изображений
+            patterns = [
+                r'"img_href":"(https?://[^"]+\.(?:jpg|jpeg|png|webp))"',
+                r'src="(https?://[^"]+\.(?:jpg|jpeg|png|webp))"',
+                r'url\(\'(https?://[^"]+\.(?:jpg|jpeg|png|webp))\'\)',
+            ]
+            
+            image_urls = []
+            for pattern in patterns:
+                matches = re.findall(pattern, html, re.IGNORECASE)
+                # Фильтруем только валидные URL
+                valid_urls = [url for url in matches if self._is_valid_image_url(url)]
+                image_urls.extend(valid_urls)
+            
+            # Убираем дубликаты
+            return list(set(image_urls))[:20]  # Берем первые 20 уникальных
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка извлечения URL: {e}")
+            return []
+    
+    def _is_valid_image_url(self, url: str) -> bool:
+        """Проверяет валидность URL изображения"""
+        # Исключаем логотипы, иконки и маленькие изображения
+        exclude_keywords = [
+            'logo', 'icon', 'avatar', 'thumb', 'small', 
+            'pixel', 'placeholder', 'yandex', 'google'
+        ]
+        
+        url_lower = url.lower()
+        return (
+            any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.webp']) and
+            not any(keyword in url_lower for keyword in exclude_keywords) and
+            'http' in url_lower
+        )
+    
+    async def _download_image(self, image_url: str) -> bytes:
+        """Скачивает изображение по URL"""
+        try:
+            async with self.session.get(image_url, timeout=20) as response:
+                if response.status == 200:
+                    image_data = await response.read()
+                    
+                    # Проверяем, что это действительно изображение
+                    if len(image_data) > 1024:  # Минимум 1KB
+                        logger.info(f"✅ Изображение скачано: {len(image_data)} bytes")
+                        return image_data
+                    else:
+                        logger.warning("❌ Слишком маленькое изображение")
+                        return b''
+                else:
+                    logger.error(f"❌ Ошибка загрузки: {response.status}")
+                    return b''
+                    
+        except Exception as e:
+            logger.error(f"❌ Ошибка скачивания: {e}")
+            return b''
+    
+    async def _get_fallback_image(self, query: str) -> bytes:
+        """Создает fallback изображение"""
+        try:
+            # Пробуем альтернативный поиск через быстрый API
+            return await self._search_alternative(query)
+        except:
+            return b''
+    
+    async def _search_alternative(self, query: str) -> bytes:
+        """Альтернативный поиск через другие методы"""
+        try:
+            # Пробуем поиск через Google Images (альтернативный метод)
+            google_url = f"https://www.google.com/search?q={quote(query)}&tbm=isch"
+            
+            async with self.session.get(google_url, timeout=20) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    # Упрощенный парсинг Google Images
+                    image_pattern = r'"(https?://[^"]+\.(?:jpg|jpeg|png|webp))"'
+                    image_urls = re.findall(image_pattern, html, re.IGNORECASE)
+                    
+                    if image_urls:
+                        image_url = random.choice(image_urls)
+                        return await self._download_image(image_url)
+            
+            return b''
+        except:
+            return b''
+
+# Инициализация поисковика
+image_searcher = YandexImageSearcher()
 
 # Переменные состояния
 last_sent_time = None
 sent_count = 0
 current_job = None
 
-class NeuroImageGenerator:
-    def __init__(self, api_key):
-        self.api_key = api_key
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-    
-    async def generate_image(self, prompt: str) -> bytes:
-        """Генерирует изображение через NeuroImg API"""
-        try:
-            logger.info(f"Генерация изображения: {prompt}")
-            
-            payload = {
-                "prompt": prompt,
-                "width": 1024,
-                "height": 1024,
-                "steps": 20,
-                "cfg_scale": 7.5,
-                "sampler": "Euler",
-                "seed": random.randint(0, 999999999),
-                "model": "stable-diffusion-xl",
-                "negative_prompt": "blurry, low quality, distorted, ugly, bad anatomy"
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    NEUROIMG_API_URL,
-                    headers=self.headers,
-                    json=payload,
-                    timeout=60
-                ) as response:
-                    
-                    if response.status == 200:
-                        result = await response.json()
-                        if result.get("status") == "success" and result.get("data"):
-                            image_data = result["data"].get("image")
-                            if image_data:
-                                # Декодируем base64 изображение
-                                if image_data.startswith('data:image'):
-                                    image_data = image_data.split(',')[1]
-                                return base64.b64decode(image_data)
-                    
-                    logger.error(f"Ошибка API: {response.status}")
-                    return await self._create_fallback_image(prompt)
-                    
-        except Exception as e:
-            logger.error(f"Ошибка генерации NeuroImg: {e}")
-            return await self._create_fallback_image(prompt)
-    
-    async def _create_fallback_image(self, prompt: str) -> bytes:
-        """Создает fallback изображение"""
-        # Простое изображение с градиентом
-        try:
-            from PIL import Image, ImageDraw
-            img = Image.new('RGB', (512, 512), color=(
-                random.randint(50, 200),
-                random.randint(50, 200), 
-                random.randint(50, 200)
-            ))
-            draw = ImageDraw.Draw(img)
-            for i in range(512):
-                r = int(i / 512 * 255)
-                g = random.randint(0, 255)
-                b = 255 - int(i / 512 * 255)
-                draw.line([(0, i), (512, i)], fill=(r, g, b), width=1)
-            img_byte_arr = io.BytesIO()
-            img.save(img_byte_arr, format='PNG')
-            return img_byte_arr.getvalue()
-        except ImportError:
-            return b''
-
-# Инициализация генератора
-image_generator = NeuroImageGenerator(NEUROIMG_API_KEY)
-
 async def send_daily_image(context: ContextTypes.DEFAULT_TYPE):
     """Отправляет ежедневное изображение в группу"""
     global last_sent_time, sent_count
     
     try:
-        if GROUP_CHAT_ID == "-1001234567890":
+        if GROUP_CHAT_ID == "-1002592721236":
             logger.error("❌ ID группы не настроен!")
             return
         
-        logger.info(f"🕒 Отправка в группу {GROUP_CHAT_ID}")
+        logger.info(f"🕒 Поиск изображения для группы {GROUP_CHAT_ID}")
         
         # Выбираем случайный промпт
         prompt = random.choice(PROMPTS + CAT_PROMPTS)
         
-        # Генерируем изображение
-        image_data = await image_generator.generate_image(prompt)
+        # Ищем изображение
+        image_data = await image_searcher.search_image(prompt)
         
-        if image_data:
+        if image_data and len(image_data) > 1024:
             # Отправляем в группу
             await context.bot.send_photo(
                 chat_id=GROUP_CHAT_ID,
                 photo=image_data,
-                caption=f"🎨 Ежедневное искусство!\n"
+                caption=f"🎨 Ежедневная картинка!\n"
                        f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
-                       f"📝 {prompt}\n\n"
-                       f"#нейросеть #искусство #ежедневно"
+                       f"🔍 По запросу: {prompt}\n\n"
+                       f"#яндекс #картинки #ежедневно"
             )
             
             # Обновляем статистику
@@ -163,7 +243,13 @@ async def send_daily_image(context: ContextTypes.DEFAULT_TYPE):
             
             logger.info(f"✅ Изображение отправлено в группу")
         else:
-            logger.error("❌ Не удалось сгенерировать изображение")
+            logger.error("❌ Не удалось найти подходящее изображение")
+            # Отправляем сообщение об ошибке
+            await context.bot.send_message(
+                chat_id=GROUP_CHAT_ID,
+                text=f"❌ Сегодня не удалось найти картинку по запросу: {prompt}\n"
+                     f"Попробуем завтра! 🌅"
+            )
             
     except Exception as e:
         logger.error(f"❌ Ошибка при отправке: {e}")
@@ -171,9 +257,9 @@ async def send_daily_image(context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главная команда"""
     welcome_text = f"""
-🎨 *Добро пожаловать в NeuroArt Бот!*
+🎨 *Добро пожаловать в Картинки Бот!*
 
-Использует нейросеть NeuroImg.art для генерации изображений.
+Я ищу красивые изображения и отправляю их в группу.
 
 *📊 Статистика:*
 • Отправок: {sent_count}
@@ -181,8 +267,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Время отправки: {POST_TIME.strftime('%H:%M')}
 
 *📋 Команды:*
-/test - Тестовое изображение
-/cat - Сгенерировать котика
+/search - Найти картинку
+/cat - Найти котика
 /status - Статус бота
 /settings - Настройки
 /set_time - Изменить время отправки
@@ -192,37 +278,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
-async def test_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Тестовая генерация"""
-    await update.message.reply_text("🎨 Генерирую тестовое изображение через NeuroImg...")
+async def search_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Поиск изображения"""
+    query = ' '.join(context.args) if context.args else random.choice(PROMPTS)
     
-    prompt = random.choice(PROMPTS)
-    image_data = await image_generator.generate_image(prompt)
+    await update.message.reply_text(f"🔍 Ищу картинку: {query}")
     
-    if image_data:
+    image_data = await image_searcher.search_image(query)
+    
+    if image_data and len(image_data) > 1024:
         await context.bot.send_photo(
             chat_id=update.message.chat_id,
             photo=image_data,
-            caption=f"🖼 NeuroImg тест\n📝 {prompt}"
+            caption=f"📷 Найдено по запросу: {query}"
         )
     else:
-        await update.message.reply_text("❌ Ошибка генерации изображения")
+        await update.message.reply_text(f"❌ Не удалось найти картинку по запросу: {query}")
 
-async def generate_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Генерация котика"""
-    await update.message.reply_text("🐱 Генерирую котика через NeuroImg...")
+async def search_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Поиск котика"""
+    query = random.choice(CAT_PROMPTS)
     
-    prompt = random.choice(CAT_PROMPTS)
-    image_data = await image_generator.generate_image(prompt)
+    await update.message.reply_text(f"🐱 Ищу котика: {query}")
     
-    if image_data:
+    image_data = await image_searcher.search_image(query)
+    
+    if image_data and len(image_data) > 1024:
         await context.bot.send_photo(
             chat_id=update.message.chat_id,
             photo=image_data,
-            caption=f"🐾 NeuroImg котик\n📝 {prompt}"
+            caption=f"🐾 Найден котик: {query}"
         )
     else:
-        await update.message.reply_text("❌ Ошибка генерации котика")
+        await update.message.reply_text(f"❌ Не удалось найти котика :(")
 
 async def force_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Принудительная отправка"""
@@ -231,7 +319,7 @@ async def force_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ ID группы не настроен!")
             return
         
-        await update.message.reply_text("🔄 Принудительная отправка...")
+        await update.message.reply_text("🔄 Принудительный поиск и отправка...")
         await send_daily_image(context)
         await update.message.reply_text("✅ Сообщение отправлено в группу!")
         
@@ -281,8 +369,8 @@ async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 • Время отправки: `{POST_TIME.strftime('%H:%M')}`
 • ID группы: `{'✅ Настроен' if GROUP_CHAT_ID != '-1001234567890' else '❌ Не настроен'}`
-• Нейросеть: `NeuroImg.art`
-• API ключ: `{'✅ Активен' if NEUROIMG_API_KEY else '❌ Не настроен'}`
+• Поисковик: `Яндекс Картинки`
+• Промптов: `{len(PROMPTS + CAT_PROMPTS)}`
 
 *Команды настроек:*
 /set_time ЧЧ:ММ - Изменить время отправки
@@ -320,7 +408,7 @@ async def set_group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Статус бота"""
     status_text = f"""
-📊 *Статус NeuroArt Бота:*
+📊 *Статус Яндекс Картинки Бота:*
 
 • 🟢 Онлайн и работает
 • ⏰ Время отправки: {POST_TIME.strftime('%H:%M')}
@@ -330,8 +418,7 @@ async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 🕒 Последняя отправка: {last_sent_time.strftime('%d.%m.%Y %H:%M') if last_sent_time else 'Никогда'}
 
 *🔧 Техническая информация:*
-• Нейросеть: NeuroImg.art
-• API: {'✅ Активен' if NEUROIMG_API_KEY else '❌ Не настроен'}
+• Поисковик: Яндекс Картинки
 • ID группы: `{GROUP_CHAT_ID}`
     """
     await update.message.reply_text(status_text, parse_mode='Markdown')
@@ -344,72 +431,4 @@ async def post_init(application: Application):
         job_queue = application.job_queue
         if job_queue:
             # Создаем ежедневную задачу
-            current_job = job_queue.run_daily(
-                send_daily_image,
-                time=POST_TIME,
-                days=tuple(range(7)),
-                name="daily_art_job"
-            )
-            
-            # Тестовая задача для отладки
-            job_queue.run_once(
-                lambda ctx: asyncio.create_task(send_daily_image(ctx)),
-                when=5,  # через 5 секунд
-                name="test_job"
-            )
-            
-            logger.info(f"✅ Задача настроена на время: {POST_TIME.strftime('%H:%M')}")
-        else:
-            logger.warning("⚠️ JobQueue недоступна")
-            
-    except Exception as e:
-        logger.error(f"❌ Ошибка настройки задач: {e}")
-
-def main():
-    """Запуск бота"""
-    try:
-        print("🎨 Запуск NeuroArt Бота...")
-        print(f"⏰ Время отправки: {POST_TIME.strftime('%H:%M')}")
-        print("🤖 Нейросеть: NeuroImg.art")
-        
-        # Создаем приложение
-        application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
-        
-        # Добавляем обработчики команд
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("test", test_image))
-        application.add_handler(CommandHandler("cat", generate_cat))
-        application.add_handler(CommandHandler("daily", force_daily))
-        application.add_handler(CommandHandler("set_time", set_post_time))
-        application.add_handler(CommandHandler("settings", show_settings))
-        application.add_handler(CommandHandler("chat_id", get_chat_id))
-        application.add_handler(CommandHandler("set_group", set_group_id))
-        application.add_handler(CommandHandler("status", bot_status))
-        
-        # Запускаем бота
-        print("\n🤖 Бот запущен! Команды:")
-        print("   /start - Главное меню")
-        print("   /test - Тест NeuroImg")
-        print("   /cat - Сгенерировать котика")
-        print("   /set_time ЧЧ:ММ - Изменить время отправки")
-        print("   /settings - Настройки")
-        print("   /chat_id - Получить ID группы")
-        print("   /set_group - Установить ID группы")
-        print("   /daily - Принудительная отправка")
-        print(f"\n⏰ Автоматическая отправка в {POST_TIME.strftime('%H:%M')}")
-        
-        application.run_polling()
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка запуска бота: {e}")
-        print(f"❌ Критическая ошибка: {e}")
-
-if __name__ == "__main__":
-    # Проверяем необходимые библиотеки
-    try:
-        import aiohttp
-        print("✅ aiohttp установлен")
-    except ImportError:
-        print("❌ aiohttp не установлен! pip install aiohttp")
-    
-    main()
+            current_job
