@@ -9,6 +9,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, CallbackCont
 import io
 from urllib.parse import quote
 import json
+import base64
 
 # Настройка логирования
 logging.basicConfig(
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Конфигурационные переменные
 BOT_TOKEN = "6387413984:AAGUMwJlOidPoKZ3_m1PgFYq1fB0j5yoxDM"
+YANDEXART_API_KEY = "ajeimg918cd8u005nb5c"  # Замените на ваш API ключ
 
 # ID группы (замените на реальный!)
 GROUP_CHAT_ID = "-1002689149167"
@@ -26,46 +28,48 @@ GROUP_CHAT_ID = "-1002689149167"
 # Время отправки по умолчанию
 POST_TIME = time(hour=9, minute=0)  # 09:00 по умолчанию
 
-# Списки промптов для поиска
+# Списки промптов для генерации
 PROMPTS = [
-    "красивый пейзаж с горами",
-    "футуристический город ночью",
-    "милые животные в природе", 
-    "космос планеты звезды",
-    "абстрактное искусство",
-    "старинный замок",
-    "подводный мир кораллы",
-    "осенний лес золотые листья",
-    "магический лес",
-    "горный водопад"
+    "красивый пейзаж с горами в стиле цифрового искусства",
+    "футуристический город ночью с неоновыми огнями",
+    "милые животные в природе, высокое качество", 
+    "космос с планетами и звездами, фантастический стиль",
+    "абстрактное искусство с яркими цветами",
+    "старинный замок в тумане, мистическая атмосфера",
+    "подводный мир с кораллами и тропическими рыбами",
+    "осенний лес с золотыми листьями, фотография",
+    "магический лес с светящимися растениями",
+    "горный водопад в солнечный день"
 ]
 
 CAT_PROMPTS = [
-    "милый пушистый котенок",
-    "красивый кот глаза",
-    "кот спит корзине",
-    "игривый котенок играет",
-    "кот в короне",
-    "группа котят",
-    "кот в лесу",
-    "кот с крыльями",
-    "котик в космосе",
-    "смешной кот"
+    "милый пушистый котенок в корзинке, фотореалистично",
+    "красивый кот с большими глазами, портрет",
+    "кот спит уютно в комнате, мягкое освещение",
+    "игривый котенок играет с клубком ниток",
+    "кот в короне как король, фэнтези стиль",
+    "группа котят вместе, милая сцена",
+    "кот в лесу среди природы, натуралистично",
+    "кот с магическими крыльями, фантастика",
+    "котик в космическом скафандре, научная фантастика",
+    "смешной кот в забавной позе, мультяшный стиль"
 ]
 
-# User-Agent для имитации браузера
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+# Настройки для YandexART API
+YANDEXART_API_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/imageGeneration"
+YANDEXART_HEADERS = {
+    "Authorization": f"Api-Key {YANDEXART_API_KEY}",
+    "Content-Type": "application/json"
 }
 
-class YandexImageSearcher:
+class YandexArtImageGenerator:
     def __init__(self):
         self.session = None
         
     async def init_session(self):
         """Инициализация сессии"""
         if not self.session:
-            self.session = aiohttp.ClientSession(headers=HEADERS)
+            self.session = aiohttp.ClientSession(headers=YANDEXART_HEADERS)
     
     async def close_session(self):
         """Закрытие сессии"""
@@ -73,136 +77,89 @@ class YandexImageSearcher:
             await self.session.close()
             self.session = None
     
-    async def search_image(self, query: str) -> bytes:
-        """Ищет изображение через Яндекс Картинки"""
+    async def generate_image(self, prompt: str) -> bytes:
+        """Генерирует изображение через YandexART API"""
         try:
             await self.init_session()
             
-            # Кодируем запрос для URL
-            encoded_query = quote(query)
+            logger.info(f"🎨 Генерация изображения: {prompt}")
             
-            # URL для поиска в Яндекс Картинках
-            search_url = f"https://yandex.ru/images/search?text={encoded_query}&itype=jpg"
+            # Параметры для генерации
+            payload = {
+                "model": "art",  # Модель для генерации изображений
+                "generationOptions": {
+                    "seed": random.randint(0, 1000000),  # Случайный seed для разнообразия
+                    "temperature": 0.7,  # Креативность (0-1)
+                    "numImages": 1  # Количество изображений
+                },
+                "messages": [
+                    {
+                        "role": "user",
+                        "text": f"Сгенерируй изображение: {prompt}. Высокое качество, детализированное, художественное."
+                    }
+                ]
+            }
             
-            logger.info(f"🔍 Поиск изображения: {query}")
-            
-            async with self.session.get(search_url, timeout=30) as response:
+            async with self.session.post(YANDEXART_API_URL, json=payload, timeout=60) as response:
                 if response.status == 200:
-                    html = await response.text()
+                    result = await response.json()
                     
-                    # Ищем URL изображений в HTML
-                    image_urls = self._extract_image_urls(html)
-                    
-                    if image_urls:
-                        # Выбираем случайное изображение
-                        image_url = random.choice(image_urls)
-                        logger.info(f"📷 Найдено изображение: {image_url}")
+                    # Извлекаем base64 изображение из ответа
+                    if 'images' in result and result['images']:
+                        image_base64 = result['images'][0]
+                        image_data = base64.b64decode(image_base64)
                         
-                        # Скачиваем изображение
-                        return await self._download_image(image_url)
-                    else:
-                        logger.warning("❌ Изображения не найдены в HTML")
-                        return await self._get_fallback_image(query)
-                else:
-                    logger.error(f"❌ Ошибка HTTP: {response.status}")
-                    return await self._get_fallback_image(query)
-                    
-        except Exception as e:
-            logger.error(f"❌ Ошибка поиска: {e}")
-            return await self._get_fallback_image(query)
-    
-    def _extract_image_urls(self, html: str) -> list:
-        """Извлекает URL изображений из HTML"""
-        try:
-            # Паттерны для поиска URL изображений
-            patterns = [
-                r'"img_href":"(https?://[^"]+\.(?:jpg|jpeg|png|webp))"',
-                r'src="(https?://[^"]+\.(?:jpg|jpeg|png|webp))"',
-                r'url\(\'(https?://[^"]+\.(?:jpg|jpeg|png|webp))\'\)',
-            ]
-            
-            image_urls = []
-            for pattern in patterns:
-                matches = re.findall(pattern, html, re.IGNORECASE)
-                # Фильтруем только валидные URL
-                valid_urls = [url for url in matches if self._is_valid_image_url(url)]
-                image_urls.extend(valid_urls)
-            
-            # Убираем дубликаты
-            return list(set(image_urls))[:20]  # Берем первые 20 уникальных
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка извлечения URL: {e}")
-            return []
-    
-    def _is_valid_image_url(self, url: str) -> bool:
-        """Проверяет валидность URL изображения"""
-        # Исключаем логотипы, иконки и маленькие изображения
-        exclude_keywords = [
-            'logo', 'icon', 'avatar', 'thumb', 'small', 
-            'pixel', 'placeholder', 'yandex', 'google'
-        ]
-        
-        url_lower = url.lower()
-        return (
-            any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.webp']) and
-            not any(keyword in url_lower for keyword in exclude_keywords) and
-            'http' in url_lower
-        )
-    
-    async def _download_image(self, image_url: str) -> bytes:
-        """Скачивает изображение по URL"""
-        try:
-            async with self.session.get(image_url, timeout=20) as response:
-                if response.status == 200:
-                    image_data = await response.read()
-                    
-                    # Проверяем, что это действительно изображение
-                    if len(image_data) > 1024:  # Минимум 1KB
-                        logger.info(f"✅ Изображение скачано: {len(image_data)} bytes")
+                        logger.info(f"✅ Изображение сгенерировано: {len(image_data)} bytes")
                         return image_data
                     else:
-                        logger.warning("❌ Слишком маленькое изображение")
-                        return b''
+                        logger.warning("❌ Изображение не сгенерировано в ответе API")
+                        return await self._get_fallback_image(prompt)
                 else:
-                    logger.error(f"❌ Ошибка загрузки: {response.status}")
-                    return b''
+                    error_text = await response.text()
+                    logger.error(f"❌ Ошибка API YandexART: {response.status} - {error_text}")
+                    return await self._get_fallback_image(prompt)
                     
+        except asyncio.TimeoutError:
+            logger.error("❌ Таймаут при генерации изображения")
+            return await self._get_fallback_image(prompt)
         except Exception as e:
-            logger.error(f"❌ Ошибка скачивания: {e}")
-            return b''
+            logger.error(f"❌ Ошибка генерации: {e}")
+            return await self._get_fallback_image(prompt)
     
-    async def _get_fallback_image(self, query: str) -> bytes:
-        """Создает fallback изображение"""
+    async def _get_fallback_image(self, prompt: str) -> bytes:
+        """Fallback на случай ошибки генерации"""
         try:
-            # Пробуем альтернативный поиск через быстрый API
-            return await self._search_alternative(query)
+            # Пробуем альтернативный метод через поиск (как было раньше)
+            return await self._search_backup_image(prompt)
         except:
             return b''
     
-    async def _search_alternative(self, query: str) -> bytes:
-        """Альтернативный поиск через другие методы"""
+    async def _search_backup_image(self, query: str) -> bytes:
+        """Резервный поиск через Яндекс.Картинки"""
         try:
-            # Пробуем поиск через Google Images (альтернативный метод)
-            google_url = f"https://www.google.com/search?q={quote(query)}&tbm=isch"
+            search_url = f"https://yandex.ru/images/search?text={quote(query)}"
             
-            async with self.session.get(google_url, timeout=20) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    # Упрощенный парсинг Google Images
-                    image_pattern = r'"(https?://[^"]+\.(?:jpg|jpeg|png|webp))"'
-                    image_urls = re.findall(image_pattern, html, re.IGNORECASE)
-                    
-                    if image_urls:
-                        image_url = random.choice(image_urls)
-                        return await self._download_image(image_url)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(search_url, timeout=30) as response:
+                    if response.status == 200:
+                        html = await response.text()
+                        
+                        # Упрощенный парсинг для fallback
+                        pattern = r'"img_href":"(https?://[^"]+\.(?:jpg|jpeg|png|webp))"'
+                        image_urls = re.findall(pattern, html)
+                        
+                        if image_urls:
+                            image_url = random.choice(image_urls)
+                            async with session.get(image_url, timeout=20) as img_response:
+                                if img_response.status == 200:
+                                    return await img_response.read()
             
             return b''
         except:
             return b''
 
-# Инициализация поисковика
-image_searcher = YandexImageSearcher()
+# Инициализация генератора
+image_generator = YandexArtImageGenerator()
 
 # Переменные состояния
 last_sent_time = None
@@ -218,36 +175,36 @@ async def send_daily_image(context: ContextTypes.DEFAULT_TYPE):
             logger.error("❌ ID группы не настроен!")
             return
         
-        logger.info(f"🕒 Поиск изображения для группы {GROUP_CHAT_ID}")
+        logger.info(f"🎨 Генерация ежедневного изображения для группы {GROUP_CHAT_ID}")
         
         # Выбираем случайный промпт
         prompt = random.choice(PROMPTS + CAT_PROMPTS)
         
-        # Ищем изображение
-        image_data = await image_searcher.search_image(prompt)
+        # Генерируем изображение
+        image_data = await image_generator.generate_image(prompt)
         
         if image_data and len(image_data) > 1024:
             # Отправляем в группу
             await context.bot.send_photo(
                 chat_id=GROUP_CHAT_ID,
                 photo=image_data,
-                caption=f"🎨 Ежедневная картинка!\n"
+                caption=f"🎨 Ежедневная AI-картинка!\n"
                        f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
-                       f"🔍 По запросу: {prompt}\n\n"
-                       f"#яндекс #картинки #ежедневно"
+                       f"🤖 Сгенерировано по запросу: {prompt}\n\n"
+                       f"#yandexart #ai #генерация #ежедневно"
             )
             
             # Обновляем статистику
             last_sent_time = datetime.now()
             sent_count += 1
             
-            logger.info(f"✅ Изображение отправлено в группу")
+            logger.info(f"✅ AI-изображение отправлено в группу")
         else:
-            logger.error("❌ Не удалось найти подходящее изображение")
+            logger.error("❌ Не удалось сгенерировать изображение")
             # Отправляем сообщение об ошибке
             await context.bot.send_message(
                 chat_id=GROUP_CHAT_ID,
-                text=f"❌ Сегодня не удалось найти картинку по запросу: {prompt}\n"
+                text=f"❌ Сегодня не удалось сгенерировать картинку по запросу: {prompt}\n"
                      f"Попробуем завтра! 🌅"
             )
             
@@ -257,9 +214,9 @@ async def send_daily_image(context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главная команда"""
     welcome_text = f"""
-🎨 *Добро пожаловать в Картинки Бот!*
+🎨 *Добро пожаловать в YandexART Бот!*
 
-Я ищу красивые изображения и отправляю их в группу.
+Я генерирую уникальные изображения с помощью AI и отправляю их в группу.
 
 *📊 Статистика:*
 • Отправок: {sent_count}
@@ -267,8 +224,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Время отправки: {POST_TIME.strftime('%H:%M')}
 
 *📋 Команды:*
-/search - Найти картинку
-/cat - Найти котика
+/generate - Сгенерировать картинку
+/cat - Сгенерировать котика
 /status - Статус бота
 /settings - Настройки
 /set_time - Изменить время отправки
@@ -278,39 +235,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
-async def search_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Поиск изображения"""
+async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Генерация изображения"""
     query = ' '.join(context.args) if context.args else random.choice(PROMPTS)
     
-    await update.message.reply_text(f"🔍 Ищу картинку: {query}")
+    await update.message.reply_text(f"🎨 Генерирую картинку: {query}")
     
-    image_data = await image_searcher.search_image(query)
+    image_data = await image_generator.generate_image(query)
     
     if image_data and len(image_data) > 1024:
         await context.bot.send_photo(
             chat_id=update.message.chat_id,
             photo=image_data,
-            caption=f"📷 Найдено по запросу: {query}"
+            caption=f"🤖 Сгенерировано по запросу: {query}"
         )
     else:
-        await update.message.reply_text(f"❌ Не удалось найти картинку по запросу: {query}")
+        await update.message.reply_text(f"❌ Не удалось сгенерировать картинку по запросу: {query}")
 
-async def search_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Поиск котика"""
+async def generate_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Генерация котика"""
     query = random.choice(CAT_PROMPTS)
     
-    await update.message.reply_text(f"🐱 Ищу котика: {query}")
+    await update.message.reply_text(f"🐱 Генерирую котика: {query}")
     
-    image_data = await image_searcher.search_image(query)
+    image_data = await image_generator.generate_image(query)
     
     if image_data and len(image_data) > 1024:
         await context.bot.send_photo(
             chat_id=update.message.chat_id,
             photo=image_data,
-            caption=f"🐾 Найден котик: {query}"
+            caption=f"🐾 Сгенерирован котик: {query}"
         )
     else:
-        await update.message.reply_text(f"❌ Не удалось найти котика :(")
+        await update.message.reply_text(f"❌ Не удалось сгенерировать котика :(")
+
+# Остальные функции остаются без изменений (force_daily, set_post_time, show_settings, get_chat_id, set_group_id, bot_status)
 
 async def force_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Принудительная отправка"""
@@ -319,7 +278,7 @@ async def force_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ ID группы не настроен!")
             return
         
-        await update.message.reply_text("🔄 Принудительный поиск и отправка...")
+        await update.message.reply_text("🔄 Принудительная генерация и отправка...")
         await send_daily_image(context)
         await update.message.reply_text("✅ Сообщение отправлено в группу!")
         
@@ -369,7 +328,7 @@ async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 • Время отправки: `{POST_TIME.strftime('%H:%M')}`
 • ID группы: `{'✅ Настроен' if GROUP_CHAT_ID != '-1001234567890' else '❌ Не настроен'}`
-• Поисковик: `Яндекс Картинки`
+• Генератор: `YandexART API`
 • Промптов: `{len(PROMPTS + CAT_PROMPTS)}`
 
 *Команды настроек:*
@@ -408,7 +367,7 @@ async def set_group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Статус бота"""
     status_text = f"""
-📊 *Статус Яндекс Картинки Бота:*
+📊 *Статус YandexART Бота:*
 
 • 🟢 Онлайн и работает
 • ⏰ Время отправки: {POST_TIME.strftime('%H:%M')}
@@ -418,7 +377,7 @@ async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 🕒 Последняя отправка: {last_sent_time.strftime('%d.%m.%Y %H:%M') if last_sent_time else 'Никогда'}
 
 *🔧 Техническая информация:*
-• Поисковик: Яндекс Картинки
+• Генератор: YandexART API
 • ID группы: `{GROUP_CHAT_ID}`
     """
     await update.message.reply_text(status_text, parse_mode='Markdown')
@@ -431,5 +390,41 @@ async def post_init(application: Application):
         job_queue = application.job_queue
         if job_queue:
             # Создаем ежедневную задачу
-            current_job
+            current_job = job_queue.run_daily(
+                send_daily_image,
+                time=POST_TIME,
+                days=tuple(range(7)),
+                name="daily_art_job"
+            )
+            logger.info(f"✅ Ежедневная задача настроена на {POST_TIME.strftime('%H:%M')}")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка инициализации: {e}")
 
+async def post_stop(application: Application):
+    """Очистка при остановке бота"""
+    await image_generator.close_session()
+    logger.info("✅ Сессия генератора закрыта")
+
+def main():
+    """Основная функция"""
+    # Создаем приложение
+    application = Application.builder().token(BOT_TOKEN).post_init(post_init).post_stop(post_stop).build()
+    
+    # Добавляем обработчики команд
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("generate", generate_image))
+    application.add_handler(CommandHandler("cat", generate_cat))
+    application.add_handler(CommandHandler("daily", force_daily))
+    application.add_handler(CommandHandler("set_time", set_post_time))
+    application.add_handler(CommandHandler("settings", show_settings))
+    application.add_handler(CommandHandler("chat_id", get_chat_id))
+    application.add_handler(CommandHandler("set_group", set_group_id))
+    application.add_handler(CommandHandler("status", bot_status))
+    
+    # Запускаем бота
+    logger.info("🤖 YandexART Бот запускается...")
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
